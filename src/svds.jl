@@ -1,123 +1,14 @@
-@enum(Svds_target,
-    svds_largest,
-    svds_smallest,
-    svds_closest_abs
-)
-
-@enum(Svds_operator,
-    svds_op_none,
-    svds_op_AtA,
-    svds_op_AAt,
-    svds_op_augmented
-)
-
-struct C_svds_stats <: PrimmeCStruct
-    numOuterIterations::PRIMME_INT
-    numRestarts::PRIMME_INT
-    numMatvecs::PRIMME_INT
-    numPreconds::PRIMME_INT
-    numGlobalSum::PRIMME_INT         # times called globalSumR
-    volumeGlobalSum::PRIMME_INT      # number of SCALARs reduced by globalSumReal
-    numOrthoInnerProds::Cdouble      # number of inner prods done by Ortho
-    elapsedTime::Cdouble
-    timeMatvec::Cdouble              # time expend by matrixMatvec
-    timePrecond::Cdouble             # time expend by applyPreconditioner
-    timeOrtho::Cdouble               # time expend by ortho
-    timeGlobalSum::Cdouble           # time expend by globalSumReal
-end
-
-struct C_svds_params <: PrimmeCStruct
-    # Low interface: configuration for the eigensolver
-    primme::C_params # Keep it as first field to access primme_svds_params from
-                          # primme_params
-    primmeStage2::C_params # other primme_params, used by hybrid
-
-    # Specify the size of the rectangular matrix A
-    m::PRIMME_INT # number of rows
-    n::PRIMME_INT # number of columns
-
-    # High interface: these values are transferred to primme and primmeStage2 properly
-    matrixMatvec::Ptr{Void}
-    # void (*matrixMatvec)
-    #    (void *x, PRIMME_INT *ldx, void *y, PRIMME_INT *ldy, int *blockSize,
-    #     int *transpose, struct primme_svds_params *primme_svds, int *ierr);
-    applyPreconditioner::Ptr{Void}
-    # void (*applyPreconditioner)
-       # (void *x, PRIMME_INT *ldx, void *y, PRIMME_INT *ldy, int *blockSize,
-        # int *transpose, struct primme_svds_params *primme_svds, int *ierr);
-
-    # Input for the following is only required for parallel programs
-    numProcs::Cint
-    procID::Cint
-    mLocal::PRIMME_INT
-    nLocal::PRIMME_INT
-    commInfo::Ptr{Void}
-    globalSumReal::Ptr{Void}
-    # void (*globalSumReal)
-       # (void *sendBuf, void *recvBuf, int *count,
-        # struct primme_svds_params *primme_svds, int *ierr);
-
-    # Though primme_svds_initialize will assign defaults, most users will set these
-    numSvals::Cint
-    target::Svds_target
-    numTargetShifts::Cint  # For primme_svds_augmented method, user has to
-    targetShifts::Ptr{Cdouble} # make sure  at least one shift must also be set
-    method::Svds_operator # one of primme_svds_AtA, primme_svds_AAt or primme_svds_augmented
-    methodStage2::Svds_operator # hybrid second stage method; accepts the same values as method */
-
-    # These pointers are not for users but for d/zprimme_svds function
-    intWorkSize::Cint
-    realWorkSize::Csize_t
-    intWork::Ptr{Cint}
-    realWork::Ptr{Void}
-
-    # These pointers may be used for users to provide matrix/preconditioner
-    matrix::Ptr{Void}
-    preconditioner::Ptr{Void}
-
-    # The following will be given default values depending on the method
-    locking::Cint
-    numOrthoConst::Cint
-    aNorm::Cdouble
-    eps::Cdouble
-
-    precondition::Cint
-    initSize::Cint
-    maxBasisSize::Cint
-    maxBlockSize::Cint
-    maxMatvecs::PRIMME_INT
-    iseed::NTuple{4,PRIMME_INT}
-    printLevel::Cint
-    outputFile::Ptr{Void}
-    stats::C_svds_stats
-
-    monitorFun::Ptr{Void}
-    # void (*monitorFun)(void *basisSvals, int *basisSize, int *basisFlags,
-       # int *iblock, int *blockSize, void *basisNorms, int *numConverged,
-       # void *lockedSvals, int *numLocked, int *lockedFlags, void *lockedNorms,
-       # int *inner_its, void *LSRes, primme_event *event, int *stage,
-       # struct primme_svds_params *primme_svds, int *err);
-    monitor::Ptr{Void}
-end
-
-free(r::Ref{C_svds_params}) = ccall((:primme_svds_free, libprimme), Void, (Ptr{C_svds_params},), r)
-_print(r::Ref{C_svds_params}) = ccall((:primme_svds_display_params, libprimme), Void, (C_svds_params,), r[])
-
-function svds_initialize()
-    r = Ref{C_svds_params}()
-    ccall((:primme_svds_initialize, libprimme), Void, (Ptr{C_svds_params},), r)
-    finalizer(r, free)
-    return r
-end
-
 # matrix-vector product, y = a * x (or y = a^t * x), where
 # (void *x, PRIMME_INT *ldx, void *y, PRIMME_INT *ldy, int *blockSize,
        # int *transpose, struct primme_svds_params *primme_svds, int *ierr);
 const _A_ = Base.Ref{Any}()
-function matrixMatvec(xp, ldxp, yp, ldyp, blockSizep, trp, parp, ierrp)
-    ldx, ldy           = unsafe_load(ldxp), unsafe_load(ldyp)
-    blockSize, tr, par = Int(unsafe_load(blockSizep)), unsafe_load(trp), unsafe_load(parp)
-    x, y = unsafe_wrap(Array, xp, (ldx, blockSize)), unsafe_wrap(Array, yp, (ldy, blockSize))
+
+function svd_matrixMatvec(xp, ldxp, yp, ldyp, blockSizep, trp, parp, ierrp)
+    x = unsafe_array_unwrap(xp, ldxp, blockSizep)
+    y = unsafe_array_unwrap(yp, ldyp, blockSizep)
+    
+    tr = unsafe_load(trp)
+    par = unsafe_load(parp)
 
     if tr == 0
         A_mul_B!( view(y, 1:par.m, :), _A_[], view(x, 1:par.n, :))
@@ -127,7 +18,7 @@ function matrixMatvec(xp, ldxp, yp, ldyp, blockSizep, trp, parp, ierrp)
     unsafe_store!(ierrp, 0)
     return nothing
 end
-_fp_ = cfunction(matrixMatvec, Void,
+_fp_ = cfunction(svd_matrixMatvec, Void,
         (Ptr{Float64}, Ptr{Int}, Ptr{Float64}, Ptr{Int}, Ptr{Cint}, Ptr{Cint},
          Ptr{C_svds_params}, Ptr{Cint}))
 
@@ -164,11 +55,11 @@ function svds(A::AbstractMatrix, k = 5; tol = 1e-12, maxBlockSize = 2k, debuglev
     r[:maxBlockSize] = maxBlockSize
     r[:method]       = method
     if debuglevel > 0
-        _print(r)
+        display_params(r)
     end
     out = _svds(r)
     if debuglevel > 0
-        _print(r)
+        display_params(r)
     end
     return out
 end

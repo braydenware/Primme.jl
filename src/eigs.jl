@@ -1,162 +1,92 @@
-@enum(Target,
-    smallest,        # leftmost eigenvalues */
-    largest,         # rightmost eigenvalues */
-    closest_geq,     # leftmost but greater than the target shift */
-    closest_leq,     # rightmost but less than the target shift */
-    closest_abs,     # the closest to the target shift */
-    largest_abs      # the farthest to the target shift */
-)
+# matrix-vector product, y = a * x, where
+# (void *x, PRIMME_INT *ldx, void *y, PRIMME_INT *ldy, int *blockSize,
+       # struct primme_params *primme, int *ierr);
+const _B_ = Base.Ref{Any}()
 
-@enum(Init,         # Initially fill up the search subspace with: */
-    init_default,
-    init_krylov, # a) Krylov with the last vector provided by the user or random */
-    init_random, # b) just random vectors */
-    init_user    # c) provided vectors or a single random vector */
-)
-
-@enum(Projection,
-    proj_default,
-    proj_RR,          # Rayleigh-Ritz */
-    proj_harmonic,    # Harmonic Rayleigh-Ritz */
-    proj_refined      # refined with fixed target */
-)
-const C_projection_params = Projection
-
-@enum(Restartscheme,
-    thick,
-    dtr
-)
-
-struct C_restarting_params <: PrimmeCStruct
-    scheme::Restartscheme
-    maxPrevRetain::Cint
+function _matvec(xp, ldxp, yp, ldyp, blockSizep, parp, ierrp)
+    x = unsafe_array_unwrap(xp, ldxp, blockSizep)
+    y = unsafe_array_unwrap(yp, ldyp, blockSizep)
+    par = unsafe_load(parp)
+    A_mul_B!( view(y, 1:par.n, :), _B_[], view(x, 1:par.n, :))
+    unsafe_store!(ierrp, 0)
+    return nothing
 end
 
-struct JD_projectors
-    LeftQ::Cint
-    LeftX::Cint
-    RightQ::Cint
-    RightX::Cint
-    SkewQ::Cint
-    SkewX::Cint
+c_matvec = cfunction(_matvec, Void,
+        (Ptr{Float64}, Ptr{Int}, Ptr{Float64}, Ptr{Int}, Ptr{Cint}, Ptr{C_params}, Ptr{Cint}))
+
+function make_c_prevec(func::Function)
+    function _prevec(xp, ldxp, yp, ldyp, blockSizep, parp, ierrp)
+        x = unsafe_array_unwrap(xp, ldxp, blockSizep)
+        y = unsafe_array_unwrap(yp, ldyp, blockSizep)
+        par = unsafe_load(parp)
+        
+        func( view(y, 1:par.n, :), _B_[], view(x, 1:par.n, :))
+        unsafe_store!(ierrp, 0)
+        return nothing
+    end
+    return cfunction(_prevec, Void, (Ptr{Float64}, Ptr{Int}, Ptr{Float64}, Ptr{Int}, Ptr{Cint}, Ptr{C_params}, Ptr{Cint}))
 end
 
-@enum(Convergencetest,
-    full_LTolerance,
-    decreasing_LTolerance,
-    adaptive_ETolerance,
-    adaptive
-)
+function eigs(A::AbstractMatrix{Float64}; prevecfunc=nothing, debuglevel::Int=0, kwargs...)
+    @assert issymmetric(A)
+    n = size(A, 2)
+    _B_[] = A
 
-struct C_correction_params <: PrimmeCStruct
-    precondition::Cint
-    robustShifts::Cint
-    maxInnerIterations::Cint
-    projectors::JD_projectors
-    convTest::Convergencetest
-    relTolBase::Cdouble
+    if prevecfunc!=nothing
+        c_prevec = make_c_prevec(prevecfunc)
+    else
+        c_prevec = nothing
+    end
+
+    r = setup_eigs(n; prevec = c_prevec, kwargs...)
+    evals, evecs, resnorms, err, r = _eigs(r; debuglevel=debuglevel)
+    if err!=0
+        throw(error("Primme.eigs failed with error-code $err"))
+    end
+
+    stats = r[].stats
+    # extract details from r and stats
+    return evals, evecs
 end
 
-struct C_stats <: PrimmeCStruct
-    numOuterIterations::PRIMME_INT
-    numRestarts::PRIMME_INT
-    numMatvecs::PRIMME_INT
-    numPreconds::PRIMME_INT
-    numGlobalSum::PRIMME_INT         # times called globalSumReal
-    volumeGlobalSum::PRIMME_INT      # number of SCALARs reduced by globalSumReal
-    numOrthoInnerProds::Cdouble      # number of inner prods done by Ortho
-    elapsedTime::Cdouble
-    timeMatvec::Cdouble              # time expend by matrixMatvec
-    timePrecond::Cdouble             # time expend by applyPreconditioner
-    timeOrtho::Cdouble               # time expend by ortho
-    timeGlobalSum::Cdouble           # time expend by globalSumReal
-    estimateMinEVal::Cdouble         # the leftmost Ritz value seen
-    estimateMaxEVal::Cdouble         # the rightmost Ritz value seen
-    estimateLargestSVal::Cdouble     # absolute value of the farthest to zero Ritz value seen
-    maxConvTol::Cdouble              # largest norm residual of a locked eigenpair
-    estimateResidualError::Cdouble   # accumulated error in V and W
+function setup_eigs(n::Int, matvec=c_matvec; prevec=nothing, maxiter::Int=300, which::Symbol=:SR, v0::Vector{Float64}=Float64[], nev::Int=6, tol::Float64 = eps(), ncv::Int = min(2nev, n-2), debuglevel::Int=0, method=nothing)
+    if !(nev<=ncv<=n-2)
+        throw(error("n=$n, nev=$nev, ncv=$ncv does not satisfy nev<=ncv<=n-2"))
+    end
+    r = initialize()
+    r[:n] = n
+    r[:matrixMatvec] = matvec
+
+    if prevec!=nothing
+        r[:applyPreconditioner] = c_prevec
+    end
+
+    r[:numEvals] = nev
+    r[:printLevel] = debuglevel
+    r[:eps] = tol
+    r[:maxOuterIterations] = maxiter
+
+    if method!=nothing
+        set_method!(r, method)
+    end
+
+    if debuglevel > 0
+        _print(r)
+    end
+    return r
 end
 
-struct C_params <: PrimmeCStruct
-
-    # The user must input at least the following two arguments
-    n::PRIMME_INT
-    matrixMatvec::Ptr{Void}
-    # void (*matrixMatvec)
-       # ( void *x, PRIMME_INT *ldx, void *y, PRIMME_INT *ldy, int *blockSize,
-         # struct primme_params *primme, int *ierr);
-
-    # Preconditioner applied on block of vectors (if available)
-    applyPreconditioner::Ptr{Void}
-    # void (*applyPreconditioner)
-       # ( void *x, PRIMME_INT *ldx,  void *y, PRIMME_INT *ldy, int *blockSize,
-         # struct primme_params *primme, int *ierr);
-
-    # Matrix times a multivector for mass matrix B for generalized Ax = xBl
-    massMatrixMatvec::Ptr{Void}
-    # void (*massMatrixMatvec)
-       # ( void *x, PRIMME_INT *ldx, void *y, PRIMME_INT *ldy, int *blockSize,
-         # struct primme_params *primme, int *ierr);
-
-    # input for the following is only required for parallel programs */
-    numProcs::Cint
-    procID::Cint
-    nLocal::PRIMME_INT
-    commInfo::Ptr{Void}
-    globalSumReal::Ptr{Void}
-    # void (*globalSumReal)
-       # (void *sendBuf, void *recvBuf, int *count, struct primme_params *primme,
-        # int *ierr );
-
-    # Though Initialize will assign defaults, most users will set these
-    numEvals::Cint
-    target::Target
-    numTargetShifts::Cint             # For targeting interior epairs,
-    targetShifts::Ptr{Cdouble}        # at least one shift must also be set
-
-    # the following will be given default values depending on the method
-    dynamicMethodSwitch::Cint
-    locking::Cint
-    initSize::Cint
-    numOrthoConst::Cint
-    maxBasisSize::Cint
-    minRestartSize::Cint
-    maxBlockSize::Cint
-    maxMatvecs::PRIMME_INT
-    maxOuterIterations::PRIMME_INT
-    intWorkSize::Cint
-    realWorkSize::Csize_t
-    iseed::NTuple{4,PRIMME_INT}
-    intWork::Ptr{Cint}
-    realWork::Ptr{Void}
-    aNorm::Cdouble
-    eps::Cdouble
-
-    printLevel::Cint
-    outputFile::Ptr{Void}
-
-    matrix::Ptr{Void}
-    preconditioner::Ptr{Void}
-    ShiftsForPreconditioner::Ptr{Cdouble}
-    initBasisMode::Init
-    ldevecs::PRIMME_INT
-    ldOPs::PRIMME_INT
-
-    projectionParams::C_projection_params
-    restartingParams::C_restarting_params
-    correctionParams::C_correction_params
-    stats::C_stats
-
-    convTestFun::Ptr{Void}
-    # void (*convTestFun)(double *eval, void *evec, double *rNorm, int *isconv, 
-          # struct primme_params *primme, int *ierr);
-    convtest::Ptr{Void}
-    monitorFun::Ptr{Void}
-    # void (*monitorFun)(void *basisEvals, int *basisSize, int *basisFlags,
-       # int *iblock, int *blockSize, void *basisNorms, int *numConverged,
-       # void *lockedEvals, int *numLocked, int *lockedFlags, void *lockedNorms,
-       # int *inner_its, void *LSRes, primme_event *event,
-       # struct primme_params *primme, int *err);
-    monitor::Ptr{Void}
+function _eigs(r::Ref{C_params}; debuglevel::Int=0)
+    n, k = r[].n, r[].numEvals
+    evals = Vector{Float64}(k)
+    evecs = rand(Float64, n, k)
+    resnorms = Vector{Float64}(k)
+    err = ccall((:dprimme, libprimme), Cint,
+        (Ptr{Float64}, Ptr{Float64}, Ptr{Float64}, Ptr{C_params}), 
+        evals, evecs, resnorms, r)
+    if debuglevel > 0
+        _print(r)
+    end
+    return evals, evecs, resnorms, err, r
 end
-
