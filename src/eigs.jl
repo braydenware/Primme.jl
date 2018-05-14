@@ -62,6 +62,22 @@ function setup_eigs(n::Int, matvec=c_matvec; prevec=nothing, maxiter::Int=300, w
         r[:applyPreconditioner] = c_prevec
     end
 
+    if which==:SR
+        r[:target] = Primme.smallest
+    elseif which==:LR
+        r[:target] = Primme.largest
+    elseif which==:LM
+        # throw(error("which=$which Not Implemented Yet"))
+        r[:target] = Primme.largest_abs
+        r[:targetShifts] = Base.unsafe_convert(Ptr{Float64}, Ref([0.]))
+        r[:numTargetShifts] = 1
+    elseif which==:SM
+        # throw(error("which=$which Not Implemented Yet"))
+        r[:target] = Primme.closest_abs
+        r[:targetShifts] = Base.unsafe_convert(Ptr{Float64}, Ref([0.]))
+        r[:numTargetShifts] = 1
+    end
+
     r[:numEvals] = nev
     r[:printLevel] = debuglevel
     r[:eps] = tol

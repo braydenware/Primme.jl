@@ -15,14 +15,25 @@ using Primme
 end
 
 @testset "eigs" begin
-    @testset "eigs n=$n, nev=$nev, method=$method" for n in [20, 40], 
+    @testset "eigs n=$n, nev=$nev, which=$which, method=$method" for n in [20, 40],
                                    nev = [1,2],
+                                   which=[:SR, :LR, :LM, :SM],
                                    method = [nothing, Primme.JDQMR, Primme.GD]
         A = randn(n, n)
         A = (A+A')
-        eigPrimme = Primme.eigs(A; nev=nev, method = method)
-        eigLAPACK = eigs(A; which=:SR, nev=nev)
-        @test eigLAPACK[1] ≈ eigPrimme[1]
-        @test abs.(eigLAPACK[2]'eigPrimme[2]) ≈ eye(nev)
+        vals, vecs = Primme.eigs(A; nev=nev, which=which, method = method)
+        vals2, vecs2 = eigs(A; which=which, nev=nev)
+
+        p = sortperm(vals)
+        p2 = sortperm(vals2)
+
+        vals = vals[p]
+        vecs = vecs[:, p]
+
+        vals2 = vals2[p2]
+        vecs2 = vecs2[:, p2]
+        @test vals ≈ vals2
+        @show vals, vals2
+        @test abs.(vecs2'vecs) ≈ eye(nev)
     end
 end
