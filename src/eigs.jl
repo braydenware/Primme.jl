@@ -46,14 +46,15 @@ function eigs(A::AbstractMatrix{Float64}; prevecfunc=nothing, debuglevel::Int=0,
     end
 
     stats = r[].stats
+    nmults = stats.numMatvecs
     # extract details from r and stats
-    return evals, evecs
+    return evals, evecs, nmults
 end
 
 function setup_eigs(n::Int, matvec=c_matvec; prevec=nothing, maxiter::Int=300, which::Symbol=:SR, v0::Vector{Float64}=Float64[], nev::Int=6, tol::Float64 = eps(), ncv::Int = min(2nev, n-2), debuglevel::Int=0, method=nothing)
-    if !(nev<=ncv<=n-2)
-        throw(error("n=$n, nev=$nev, ncv=$ncv does not satisfy nev<=ncv<=n-2"))
-    end
+    # if !(nev<=ncv<=n-2)
+    #     throw(error("n=$n, nev=$nev, ncv=$ncv does not satisfy nev<=ncv<=n-2"))
+    # end
     r = initialize()
     r[:n] = n
     r[:matrixMatvec] = matvec
