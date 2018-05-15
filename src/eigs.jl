@@ -105,7 +105,7 @@ function setup_eigs(n::Int, matvec=c_matvec;
     end
 
     if debuglevel > 0
-        _print(r)
+        display_params(r)
     end
     return r, evecs
 end
@@ -118,7 +118,7 @@ function _eigs(r::Ref{C_params}, evecs::Matrix{Float64}; debuglevel::Int=0)
         (Ptr{Float64}, Ptr{Float64}, Ptr{Float64}, Ptr{C_params}), 
         evals, evecs, resnorms, r)
     if debuglevel > 0
-        _print(r)
+        display_params(r)
     end
     return evals, evecs, resnorms, err, r
 end
