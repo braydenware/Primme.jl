@@ -19,3 +19,9 @@ function unsafe_array_unwrap(xp, ldxp, blockSizep)
     x = unsafe_wrap(Array, xp, (ldx, blockSize))
     return x
 end
+
+function unsafe_vector_unwrap(xp, szp)
+    sz = Int(unsafe_load(szp))
+    x = unsafe_wrap(Array, xp, (sz,))
+    return x
+end

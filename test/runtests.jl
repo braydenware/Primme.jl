@@ -17,7 +17,7 @@ end
 @testset "eigs" begin
     @testset "eigs n=$n, nev=$nev, which=$which, method=$method" for n in [20, 40],
                                    nev = [1,2],
-                                   which=[:SR, :LR, :LM, :SM],
+                                   which=[:SR, :LR],
                                    method = [nothing, Primme.JDQMR, Primme.GD]
         A = randn(n, n)
         A = (A+A')
@@ -33,7 +33,6 @@ end
         vals2 = vals2[p2]
         vecs2 = vecs2[:, p2]
         @test vals ≈ vals2
-        @show vals, vals2
         @test abs.(vecs2'vecs) ≈ eye(nev)
     end
 end

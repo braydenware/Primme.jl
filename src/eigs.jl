@@ -20,21 +20,22 @@ function make_c_prevec(func::Function)
         x = unsafe_array_unwrap(xp, ldxp, blockSizep)
         y = unsafe_array_unwrap(yp, ldyp, blockSizep)
         par = unsafe_load(parp)
-        
-        func( view(y, 1:par.n, :), _B_[], view(x, 1:par.n, :))
+        shiftsp = par.ShiftsForPreconditioner
+        shifts = unsafe_vector_unwrap(xp, blockSizep)
+        func( view(y, 1:par.n, :), _B_[], view(x, 1:par.n, :), shifts)
         unsafe_store!(ierrp, 0)
         return nothing
     end
     return cfunction(_prevec, Void, (Ptr{Float64}, Ptr{Int}, Ptr{Float64}, Ptr{Int}, Ptr{Cint}, Ptr{C_params}, Ptr{Cint}))
 end
 
-function eigs(A::AbstractMatrix{Float64}; prevecfunc=nothing, debuglevel::Int=0, kwargs...)
+function eigs(A::AbstractMatrix{Float64}; precond=nothing, debuglevel::Int=0, kwargs...)
     @assert issymmetric(A)
     n = size(A, 2)
     _B_[] = A
 
-    if prevecfunc!=nothing
-        c_prevec = make_c_prevec(prevecfunc)
+    if precond!=nothing
+        c_prevec = make_c_prevec(precond)
     else
         c_prevec = nothing
     end
@@ -64,7 +65,7 @@ function setup_eigs(n::Int, matvec=c_matvec;
     r[:matrixMatvec] = matvec
 
     if prevec!=nothing
-        r[:applyPreconditioner] = c_prevec
+        r[:applyPreconditioner] = prevec
     end
 
     if !isempty(v0)
