@@ -39,8 +39,8 @@ function eigs(A::AbstractMatrix{Float64}; prevecfunc=nothing, debuglevel::Int=0,
         c_prevec = nothing
     end
 
-    r = setup_eigs(n; prevec = c_prevec, kwargs...)
-    evals, evecs, resnorms, err, r = _eigs(r; debuglevel=debuglevel)
+    r, evecs = setup_eigs(n; prevec = c_prevec, kwargs...)
+    evals, evecs, resnorms, err, r = _eigs(r, evecs; debuglevel=debuglevel)
     if err!=0
         throw(error("Primme.eigs failed with error-code $err"))
     end
@@ -51,7 +51,11 @@ function eigs(A::AbstractMatrix{Float64}; prevecfunc=nothing, debuglevel::Int=0,
     return evals, evecs, nmults
 end
 
-function setup_eigs(n::Int, matvec=c_matvec; prevec=nothing, maxiter::Int=300, which::Symbol=:SR, v0::Vector{Float64}=Float64[], nev::Int=6, tol::Float64 = eps(), ncv::Int = min(2nev, n-2), debuglevel::Int=0, method=nothing)
+function setup_eigs(n::Int, matvec=c_matvec;
+                    prevec=nothing, maxiter::Int=300,
+                    which::Symbol=:SR, v0::Matrix{Float64}=zeros(Float64, 0, 0),
+                    nev::Int=6, tol::Float64 = eps(), ncv::Int = min(2nev, n-2),
+                    debuglevel::Int=0, method=nothing)
     # if !(nev<=ncv<=n-2)
     #     throw(error("n=$n, nev=$nev, ncv=$ncv does not satisfy nev<=ncv<=n-2"))
     # end
@@ -63,18 +67,29 @@ function setup_eigs(n::Int, matvec=c_matvec; prevec=nothing, maxiter::Int=300, w
         r[:applyPreconditioner] = c_prevec
     end
 
+    if !isempty(v0)
+        evecs = rand(Float64, n, nev)
+        r[:initBasisMode] = init_user
+
+        k = min(nev, size(v0, 2))
+        r[:initSize] = k
+        evecs[:, 1:k] = v0[:, 1:k]
+    else
+        evecs = rand(Float64, n, nev)
+    end
+
     if which==:SR
-        r[:target] = Primme.smallest
+        r[:target] = smallest
     elseif which==:LR
-        r[:target] = Primme.largest
+        r[:target] = largest
     elseif which==:LM
         # throw(error("which=$which Not Implemented Yet"))
-        r[:target] = Primme.largest_abs
+        r[:target] = largest_abs
         r[:targetShifts] = Base.unsafe_convert(Ptr{Float64}, Ref([0.]))
         r[:numTargetShifts] = 1
     elseif which==:SM
         # throw(error("which=$which Not Implemented Yet"))
-        r[:target] = Primme.closest_abs
+        r[:target] = closest_abs
         r[:targetShifts] = Base.unsafe_convert(Ptr{Float64}, Ref([0.]))
         r[:numTargetShifts] = 1
     end
@@ -91,13 +106,12 @@ function setup_eigs(n::Int, matvec=c_matvec; prevec=nothing, maxiter::Int=300, w
     if debuglevel > 0
         _print(r)
     end
-    return r
+    return r, evecs
 end
 
-function _eigs(r::Ref{C_params}; debuglevel::Int=0)
+function _eigs(r::Ref{C_params}, evecs::Matrix{Float64}; debuglevel::Int=0)
     n, k = r[].n, r[].numEvals
     evals = Vector{Float64}(k)
-    evecs = rand(Float64, n, k)
     resnorms = Vector{Float64}(k)
     err = ccall((:dprimme, libprimme), Cint,
         (Ptr{Float64}, Ptr{Float64}, Ptr{Float64}, Ptr{C_params}), 
