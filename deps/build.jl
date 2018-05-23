@@ -28,7 +28,9 @@ if LinAlg.USE_BLAS64
 end
 
 libpath = dirname(Libdl.dlpath(Base.liblapack_name))
+# println("make solib CFLAGS=$cflags LDFLAGS=-l$(Base.liblapack_name[4:end]) -l$(Base.libblas_name[4:end]) -L$libpath")
+#
+# cd(srcdir) do
+ #     run(`make solib CFLAGS=$cflags LDFLAGS="-l$(Base.liblapack_name[4:end]) -l$(Base.libblas_name[4:end]) -L$libpath"`)
+# end
 
-cd(srcdir) do
-    run(`make solib CFLAGS=$cflags LDFLAGS="-l$(Base.liblapack_name[4:end]) -l$(Base.libblas_name[4:end]) -L$libpath"`)
-end

@@ -1,0 +1,11 @@
+In primme/Make_flags, switch compiler flags by uncommenting the using intel compilers block and also the building matlab interface block
+
+Set $INCLUDE using
+export INCLUDE="-I/usr/local/shared/cloog/0.18.1//include -I/usr/local/shared/gmp/6.0.0//include:/usr/local/shared/mpfr/3.1.2/include -I/usr/local/shared/mpc/1.0.2/include -I/usr/local/shared/intel/composer_xe_2015/mkl//include"
+
+instead of the default value for INCLUDE which is "/usr/local/shared/cloog/0.18.1//include:/usr/local/shared/gmp/6.0.0//include:/usr/local/shared/mpfr/3.1.2/include:/usr/local/shared/mpc/1.0.2/include:/usr/local/shared/intel/composer_xe_2015/mkl//include"
+
+then run 
+"make solib"
+
+use --dry-run first to check
